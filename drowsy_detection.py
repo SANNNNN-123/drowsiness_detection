@@ -133,24 +133,25 @@ class VideoFrameHandler:
             The processed frame and a boolean flag to
             indicate if the alarm should be played or not.
         """
-
-        # To improve performance,
-        # mark the frame as not writeable to pass by reference.
-        frame.flags.writeable = False
-        frame_h, frame_w, _ = frame.shape
+        # Make a copy of the frame for processing
+        frame_for_detection = frame.copy()
+        frame_for_detection.flags.writeable = False
+        frame_h, frame_w, _ = frame_for_detection.shape
 
         DROWSY_TIME_txt_pos = (10, int(frame_h // 2 * 1.7))
         ALM_txt_pos = (10, int(frame_h // 2 * 1.85))
 
-        results = self.facemesh_model.process(frame)
+        results = self.facemesh_model.process(frame_for_detection)
+
+        # Create a copy for drawing
+        output_frame = frame.copy()
 
         if results.multi_face_landmarks:
             landmarks = results.multi_face_landmarks[0].landmark
             EAR, coordinates = calculate_avg_ear(landmarks, self.eye_idxs["left"], self.eye_idxs["right"], frame_w, frame_h)
-            frame = plot_eye_landmarks(frame, coordinates[0], coordinates[1], self.state_tracker["COLOR"])
+            output_frame = plot_eye_landmarks(output_frame, coordinates[0], coordinates[1], self.state_tracker["COLOR"])
 
             if EAR < thresholds["EAR_THRESH"]:
-
                 # Increase DROWSY_TIME to track the time period with EAR less than the threshold
                 # and reset the start_time for the next iteration.
                 end_time = time.perf_counter()
@@ -161,7 +162,7 @@ class VideoFrameHandler:
 
                 if self.state_tracker["DROWSY_TIME"] >= thresholds["WAIT_TIME"]:
                     self.state_tracker["play_alarm"] = True
-                    plot_text(frame, "WAKE UP! WAKE UP", ALM_txt_pos, self.state_tracker["COLOR"])
+                    plot_text(output_frame, "WAKE UP! WAKE UP", ALM_txt_pos, self.state_tracker["COLOR"])
 
             else:
                 self.state_tracker["start_time"] = time.perf_counter()
@@ -171,8 +172,8 @@ class VideoFrameHandler:
 
             EAR_txt = f"EAR: {round(EAR, 2)}"
             DROWSY_TIME_txt = f"DROWSY: {round(self.state_tracker['DROWSY_TIME'], 3)} Secs"
-            plot_text(frame, EAR_txt, self.EAR_txt_pos, self.state_tracker["COLOR"])
-            plot_text(frame, DROWSY_TIME_txt, DROWSY_TIME_txt_pos, self.state_tracker["COLOR"])
+            plot_text(output_frame, EAR_txt, self.EAR_txt_pos, self.state_tracker["COLOR"])
+            plot_text(output_frame, DROWSY_TIME_txt, DROWSY_TIME_txt_pos, self.state_tracker["COLOR"])
 
         else:
             self.state_tracker["start_time"] = time.perf_counter()
@@ -181,6 +182,6 @@ class VideoFrameHandler:
             self.state_tracker["play_alarm"] = False
 
             # Flip the frame horizontally for a selfie-view display.
-            frame = cv2.flip(frame, 1)
+            output_frame = cv2.flip(output_frame, 1)
 
-        return frame, self.state_tracker["play_alarm"]
+        return output_frame, self.state_tracker["play_alarm"]
