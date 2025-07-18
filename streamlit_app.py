@@ -1,83 +1,88 @@
 import os
-import av
-import threading
+import cv2
+import time
 import streamlit as st
-import streamlit_nested_layout
-from streamlit_webrtc import VideoHTMLAttributes, webrtc_streamer
-
-from audio_handling import AudioFrameHandler
 from drowsy_detection import VideoFrameHandler
+from pygame import mixer
+import pygame
 
-# Define the audio file to use.
-alarm_file_path = os.path.join("audio", "wake_up.wav")
+# Initialize Pygame mixer with proper settings
+try:
+    pygame.init()
+    mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
+    alarm_sound = mixer.Sound("audio/wake_up.wav")
+    st.success("Audio system initialized successfully!")
+except Exception as e:
+    st.error(f"Error initializing audio system: {str(e)}")
+    alarm_sound = None
 
-# Streamlit Components
-st.set_page_config(
-    page_title="Drowsiness Detection | LearnOpenCV",
-    page_icon="https://learnopencv.com/wp-content/uploads/2017/12/favicon.png",
-    layout="wide",  # centered, wide
-    initial_sidebar_state="expanded",
-    menu_items={
-        "About": "### Visit www.learnopencv.com for more exciting tutorials!!!",
-    },
-)
+# Initialize VideoFrameHandler
+video_handler = VideoFrameHandler()
 
-
-col1, col2 = st.columns(spec=[6, 2], gap="medium")
-
-with col1:
-    st.title("Drowsiness Detection!!!🥱😪😴")
-    with st.container():
-        c1, c2 = st.columns(spec=[1, 1])
-        with c1:
-            # The amount of time (in seconds) to wait before sounding the alarm.
-            WAIT_TIME = st.slider("Seconds to wait before sounding alarm:", 0.0, 5.0, 1.0, 0.25)
-
-        with c2:
-            # Lowest valid value of Eye Aspect Ratio. Ideal values [0.15, 0.2].
-            EAR_THRESH = st.slider("Eye Aspect Ratio threshold:", 0.0, 0.4, 0.18, 0.01)
+# Create sliders for parameters
+st.title("Drowsiness Detection 🥱😪😴")
+with st.container():
+    c1, c2 = st.columns(2)
+    with c1:
+        WAIT_TIME = st.slider("Seconds to wait before sounding alarm:", 0.0, 5.0, 1.0, 0.25)
+    with c2:
+        EAR_THRESH = st.slider("Eye Aspect Ratio threshold:", 0.0, 0.4, 0.18, 0.01)
 
 thresholds = {
     "EAR_THRESH": EAR_THRESH,
     "WAIT_TIME": WAIT_TIME,
 }
 
-# For streamlit-webrtc
-video_handler = VideoFrameHandler()
-audio_handler = AudioFrameHandler(sound_file_path=alarm_file_path)
+# Initialize webcam
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-lock = threading.Lock()  # For thread-safe access & to prevent race-condition.
-shared_state = {"play_alarm": False}
+# Create a placeholder for the video feed
+video_placeholder = st.empty()
 
+# Create a stop button
+stop_button = st.button("Stop")
 
-def video_frame_callback(frame: av.VideoFrame):
-    frame = frame.to_ndarray(format="bgr24")  # Decode and convert frame to RGB
+# Add volume control
+volume = st.slider("Alarm Volume", 0.0, 1.0, 0.5, 0.1)
+if alarm_sound:
+    alarm_sound.set_volume(volume)
 
-    frame, play_alarm = video_handler.process(frame, thresholds)  # Process frame
-    with lock:
-        shared_state["play_alarm"] = play_alarm  # Update shared state
+while cap.isOpened() and not stop_button:
+    ret, frame = cap.read()
+    if not ret:
+        st.error("Failed to capture video frame")
+        break
 
-    return av.VideoFrame.from_ndarray(frame, format="bgr24")  # Encode and return BGR frame
+    # Process frame for drowsiness detection
+    frame, play_alarm = video_handler.process(frame, thresholds)
 
+    # Play alarm if needed and if audio is available
+    if play_alarm and alarm_sound:
+        if not mixer.get_busy():  # Only play if not already playing
+            try:
+                alarm_sound.play()
+            except Exception as e:
+                st.error(f"Error playing alarm: {str(e)}")
+    elif not play_alarm and alarm_sound:
+        alarm_sound.stop()
 
-def audio_frame_callback(frame: av.AudioFrame):
-    with lock:  # access the current “play_alarm” state
-        play_alarm = shared_state["play_alarm"]
+    # Convert BGR to RGB for Streamlit
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Display the frame
+    video_placeholder.image(frame, channels="RGB", use_container_width=True)
 
-    new_frame: av.AudioFrame = audio_handler.process(frame, play_sound=play_alarm)
-    return new_frame
+    # Add a small delay to control frame rate
+    time.sleep(0.033)  # Approximately 30 FPS
 
+# Release resources when stopped
+cap.release()
+if alarm_sound:
+    alarm_sound.stop()
+    mixer.quit()
+pygame.quit()
 
-# https://github.com/whitphx/streamlit-webrtc/blob/main/streamlit_webrtc/config.py
-
-with col1:
-    webrtc_ctx = webrtc_streamer(
-        key="drowsiness_detection",  # Changed the key to remove special characters
-        video_frame_callback=video_frame_callback,
-        audio_frame_callback=audio_frame_callback,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        media_stream_constraints={"video": {"height": {"ideal": 480}}, "audio": True},
-        video_html_attrs=VideoHTMLAttributes(autoPlay=True, controls=False, muted=False),
-        async_processing=True,
-    )
+st.write("Video capture stopped")
 
