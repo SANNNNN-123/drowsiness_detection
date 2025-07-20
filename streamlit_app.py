@@ -3,18 +3,6 @@ import cv2
 import time
 import streamlit as st
 from drowsy_detection import VideoFrameHandler
-from pygame import mixer
-import pygame
-
-# Initialize Pygame mixer with proper settings
-try:
-    pygame.init()
-    mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
-    alarm_sound = mixer.Sound("audio/wake_up.wav")
-    st.success("Audio system initialized successfully!")
-except Exception as e:
-    st.error(f"Error initializing audio system: {str(e)}")
-    alarm_sound = None
 
 # Initialize VideoFrameHandler
 video_handler = VideoFrameHandler()
@@ -33,21 +21,33 @@ thresholds = {
     "WAIT_TIME": WAIT_TIME,
 }
 
-# Initialize webcam
-cap = cv2.VideoCapture(0)
+# Initialize webcam with error handling
+try:
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        st.error("Could not access webcam. Please check your camera settings.")
+        st.info("Note: This app requires camera access to work.")
+        st.stop()
+except Exception as e:
+    st.error(f"Error accessing webcam: {str(e)}")
+    st.info("Note: This app requires camera access to work.")
+    st.stop()
+
+# Set camera properties
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 # Create a placeholder for the video feed
 video_placeholder = st.empty()
 
+# Create status indicators
+status_container = st.container()
+with status_container:
+    status_text = st.empty()
+    alert_text = st.empty()
+
 # Create a stop button
 stop_button = st.button("Stop")
-
-# Add volume control
-volume = st.slider("Alarm Volume", 0.0, 1.0, 0.5, 0.1)
-if alarm_sound:
-    alarm_sound.set_volume(volume)
 
 while cap.isOpened() and not stop_button:
     ret, frame = cap.read()
@@ -58,15 +58,13 @@ while cap.isOpened() and not stop_button:
     # Process frame for drowsiness detection
     frame, play_alarm = video_handler.process(frame, thresholds)
 
-    # Play alarm if needed and if audio is available
-    if play_alarm and alarm_sound:
-        if not mixer.get_busy():  # Only play if not already playing
-            try:
-                alarm_sound.play()
-            except Exception as e:
-                st.error(f"Error playing alarm: {str(e)}")
-    elif not play_alarm and alarm_sound:
-        alarm_sound.stop()
+    # Update status instead of playing sound
+    if play_alarm:
+        alert_text.warning("⚠️ WAKE UP! WAKE UP! ⚠️")
+        status_text.error("Drowsiness Detected!")
+    else:
+        alert_text.empty()
+        status_text.success("Alert and Monitoring...")
 
     # Convert BGR to RGB for Streamlit
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -79,10 +77,18 @@ while cap.isOpened() and not stop_button:
 
 # Release resources when stopped
 cap.release()
-if alarm_sound:
-    alarm_sound.stop()
-    mixer.quit()
-pygame.quit()
 
 st.write("Video capture stopped")
+
+# Add deployment note
+st.markdown("""
+---
+### Note for Local Deployment
+To enable audio alerts:
+1. Download the code from the repository
+2. Install the required dependencies
+3. Run locally using `streamlit run streamlit_app.py`
+
+The audio alerts are disabled in the cloud deployment due to hardware limitations.
+""")
 
