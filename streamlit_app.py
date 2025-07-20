@@ -8,14 +8,6 @@ from streamlit_webrtc import VideoHTMLAttributes, webrtc_streamer
 from audio_handling import AudioFrameHandler
 from drowsy_detection import VideoFrameHandler
 
-# Initialize session state
-if 'drowsiness_detection_state' not in st.session_state:
-    st.session_state['drowsiness_detection_state'] = {
-        'start_time': None,
-        'drowsy_time': 0.0,
-        'is_active': False
-    }
-
 # Define the audio file to use.
 alarm_file_path = os.path.join("audio", "wake_up.wav")
 
@@ -29,6 +21,7 @@ st.set_page_config(
         "About": "### Visit www.learnopencv.com for more exciting tutorials!!!",
     },
 )
+
 
 col1, col2 = st.columns(spec=[6, 2], gap="medium")
 
@@ -56,6 +49,7 @@ audio_handler = AudioFrameHandler(sound_file_path=alarm_file_path)
 lock = threading.Lock()  # For thread-safe access & to prevent race-condition.
 shared_state = {"play_alarm": False}
 
+
 def video_frame_callback(frame: av.VideoFrame):
     frame = frame.to_ndarray(format="bgr24")  # Decode and convert frame to RGB
 
@@ -65,32 +59,25 @@ def video_frame_callback(frame: av.VideoFrame):
 
     return av.VideoFrame.from_ndarray(frame, format="bgr24")  # Encode and return BGR frame
 
+
 def audio_frame_callback(frame: av.AudioFrame):
-    with lock:  # access the current "play_alarm" state
+    with lock:  # access the current “play_alarm” state
         play_alarm = shared_state["play_alarm"]
 
     new_frame: av.AudioFrame = audio_handler.process(frame, play_sound=play_alarm)
     return new_frame
 
+
+# https://github.com/whitphx/streamlit-webrtc/blob/main/streamlit_webrtc/config.py
+
 with col1:
-    try:
-        ctx = webrtc_streamer(
-            key="drowsiness-detection",
-            video_frame_callback=video_frame_callback,
-            audio_frame_callback=audio_frame_callback,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"video": {"height": {"ideal": 480}}, "audio": True},
-            video_html_attrs=VideoHTMLAttributes(autoPlay=True, controls=False, muted=False),
-        )
-        
-        # Update session state based on WebRTC context
-        if ctx.state.playing:
-            st.session_state.drowsiness_detection_state['is_active'] = True
-        else:
-            st.session_state.drowsiness_detection_state['is_active'] = False
-            
-    except Exception as e:
-        st.error(f"Error initializing video stream: {str(e)}")
-        if ctx is not None and ctx.video_transformer:
-            ctx.video_transformer.close()
+    webrtc_ctx = webrtc_streamer(
+        key="drowsiness_detection",  # Changed the key to remove special characters
+        video_frame_callback=video_frame_callback,
+        audio_frame_callback=audio_frame_callback,
+        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+        media_stream_constraints={"video": {"height": {"ideal": 480}}, "audio": True},
+        video_html_attrs=VideoHTMLAttributes(autoPlay=True, controls=False, muted=False),
+        async_processing=True,
+    )
 
